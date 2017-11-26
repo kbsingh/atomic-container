@@ -4,22 +4,26 @@
 # dnf configuration in order to enable other languages.
 #
 ###  Hacking on this image ###
-# We assume this runs on a CentOS Linux 7/x86_64 machine, with virt ( or nested virt ) 
+# We assume this runs on a CentOS Linux 7/x86_64 machine, with virt ( or nested virt )
 # enabled, use the build.sh script to build your own for testing
 
 # text don't use cmdline -- https://github.com/rhinstaller/anaconda/issues/931
 cmdline
 bootloader --disabled
-timezone --isUtc --nontp Etc/UTC
+timezone --isUtc --nontp UTC
 rootpw --lock --iscrypted locked
 
 keyboard us
-network --bootproto=dhcp --device=link --activate --onboot=on
-poweroff
+lang en_US
 
+firewall --disabled
+network --bootproto=dhcp --device=link --activate --onboot=on
+
+shutdown
+
+# Disk setup
 zerombr
 clearpart --all
-part /boot/efi --fstype="vfat" --size=100
 part / --fstype ext4 --grow
 
 # Add nessasary repo for microdnf
@@ -30,104 +34,115 @@ repo --name="updates" --baseurl="http://mirror.centos.org/centos/7/updates/x86_6
 bash
 centos-release
 microdnf
--kernel
--e2fsprogs
--libss # used by e2fsprogs
--fuse-libs
 -audit-libs
--diffutils
--libmnl
--libnetfilter_conntrack
--iproute
--kmod-libs
--snappy
--libsemanage
--hardlink
--lzo
--gzip
--libblkid
--cracklib-dicts
--pam
--procps-ng
--binutils
+-basesystem
 -bind-libs-lite
--dhcp-common
+-bind-license
+-bind-license
+-binutils
+-cpio
+-cracklib
+-cracklib-dicts
+-cryptsetup-libs
+-dbus
 -dbus-libs
 -device-mapper
--cryptsetup-libs
--kmod
--dbus
--initscripts
+-device-mapper-libs
+-dhclient
+-dhcp-common
+-dhcp-libs
+-diffutils
+-dosfstools
+-dracut
 -dracut-network
+-e2fsprogs
 -ethtool
--gpg-pubkey
--basesystem
--bind-license
--libuuid
--cpio
--libnfnetlink
--hostname
--iptables
--tar
+-firewalld-filesystem
+-*firmware
+-freetype
+-fuse-libs
 -GeoIP
--sysvinit-tools
--ustr
+-gettext*
+-gpg-pubkey
+-gzip
+-hardlink
+-hostname
+-initscripts
+-iproute
+-iptables
+-iputils
+-kernel
+-kexec-tools
+-kmod
+-kmod-libs
+-kpartx
+-libblkid
+-libmnl
+-libmount
+-libnetfilter_conntrack
+-libnfnetlink
+-libpwquality
+-libsemanage
+-libss # used by e2fsprogs
+-libteam
+-libuser
+-libutempter
+-libuuid
+-lzo
+-os-prober
+-pam
+-procps-ng
 -qrencode-libs
 -shadow-utils
--cracklib
--libmount
--libpwquality
--systemd-libs
--libutempter
--dhcp-libs
--libuser
--kpartx
--device-mapper-libs
--dracut
+-snappy
 -systemd
--iputils
--dhclient
--kexec-tools
--dosfstools
+-systemd-libs
+-sysvinit-tools
+-tar
+-teamd
+-ustr
 
 %end
 
-%post --interpreter=/usr/bin/sh --nochroot --erroronfail --log=/mnt/sysimage/root/anaconda-post-nochroot.log
+%post --log=/anaconda-post.log --erroronfail
+# Post configure tasks for Docker
 set -eux
+
+# Remove packages anaconda is insistent on installing
+# This list includes packages installed under all modes
+microdnf remove acl audit-libs binutils cpio cracklib cracklib-dicts cryptsetup-libs dbus dbus-glib dbus-libs dbus-python device-mapper device-mapper-libs diffutils dracut e2fsprogs e2fsprogs-libs ebtables elfutils-libs firewalld firewalld-filesystem gdbm gzip hardlink ipset ipset-libs iptables kmod kmod-libs kpartx libcap-ng libmnl libnetfilter_conntrack libnfnetlink libpwquality libselinux-python libsemanage libss libuser libutempter pam procps-ng python python-decorator python-firewall python-gobject-base python-libs python-slip python-slip-dbus qemu-guest-agent qrencode-libs shadow-utils systemd systemd-libs tar ustr util-linux xz
+
+microdnf clean all
 
 # Set install langs macro so that new rpms that get installed will
 # only install langs that we limit it to.
 LANG="en_US"
-echo "%_install_langs $LANG" > /etc/rpm/macros.image-language-conf
-# https://bugzilla.redhat.com/show_bug.cgi?id=1400682
-echo "Import RPM GPG key"
-releasever=$(rpm -q --qf '%{version}\n' centos-release)
-rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-$releasever
+echo "%_install_langs ${LANG}" > /etc/rpm/macros.image-language-conf
+for dir in locale i18n; do
+    find /usr/share/${dir} \
+      -mindepth  1 -maxdepth 1 -type d \
+      -not \( -name "${LANG}" -o -name POSIX \) \
+      -exec rm -rfv {} +
+done
+
+echo 'container' > /etc/yum/vars/infra
+
+# clear fstab
 echo "# fstab intentionally empty for containers" > /etc/fstab
 
-# Remove machine-id on pre generated images
-rm -fv /etc/machine-id
-touch /etc/machine-id
-
-# remove some random help txt files
+## Remove some things we don't need
+rm -rf /boot /etc/firewalld  # unused directories
+rm -rf /etc/sysconfig/network-scripts/ifcfg-*
 rm -fv usr/share/gnupg/help*.txt
+rm /usr/lib/rpm/rpm.daily
+rm -rfv /usr/lib64/nss/unsupported-tools/  # unsupported
+rm -rfv /var/lib/yum  # dnf info
+rm -rfv /usr/share/icons/*  # icons are unused
+rm -fv /usr/bin/pinky  # random not-that-useful binary
 
-# Pruning random things
-rm usr/lib/rpm/rpm.daily
-rm -rfv usr/lib64/nss/unsupported-tools/  # unsupported
-
-# Statically linked crap
-rm -fv usr/sbin/{glibc_post_upgrade.x86_64,sln}
-ln usr/bin/ln usr/sbin/sln
-
-# Remove some dnf info
-rm -rfv /var/lib/yum
-
-# don't need icons
-rm -rfv /usr/share/icons/*
-
-#some random not-that-useful binaries
-rm -fv /usr/bin/pinky
+# statically linked stuff
+rm -fv /usr/sbin/{glibc_post_upgrade.x86_64,sln}
+ln /usr/bin/ln usr/sbin/sln
 
 # we lose presets by removing /usr/lib/systemd but we do not care
 rm -rfv /usr/lib/systemd
@@ -137,14 +152,17 @@ rm -fv /etc/localtime
 mv /usr/share/zoneinfo/UTC /etc/localtime
 rm -rfv  /usr/share/zoneinfo
 
-# Final pruning
-rm -rfv var/cache/* var/log/* tmp/*
+## Systemd fixes
+# no machine-id by default.
+:> /etc/machine-id
+
+## Final Pruning
+rm -rfv /var/{cache,log}/* /tmp/*
 
 %end
 
 %post --interpreter=/usr/bin/sh --nochroot --erroronfail --log=/mnt/sysimage/root/anaconda-post-nochroot.log
 set -eux
-
 # https://bugzilla.redhat.com/show_bug.cgi?id=1343138
 # Fix /run/lock breakage since it's not tmpfs in docker
 # This unmounts /run (tmpfs) and then recreates the files
@@ -157,13 +175,5 @@ umount /mnt/sysimage/run
 # file here manually with the settings from legacy.conf
 # NOTE: chroot to run "install" because it is not in anaconda env
 chroot /mnt/sysimage install -d /run/lock -m 0755 -o root -g root
-
-
-# See: https://bugzilla.redhat.com/show_bug.cgi?id=1051816
-# NOTE: run this in nochroot because "find" does not exist in chroot
-KEEPLANG=en_US
-for dir in locale i18n; do
-    find /mnt/sysimage/usr/share/${dir} -mindepth  1 -maxdepth 1 -type d -not \( -name "${KEEPLANG}" -o -name POSIX \) -exec rm -rfv {} +
-done
 
 %end
