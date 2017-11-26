@@ -7,8 +7,8 @@
 # We assume this runs on a CentOS Linux 7/x86_64 machine, with virt ( or nested virt )
 # enabled, use the build.sh script to build your own for testing
 
-# text don't use cmdline -- https://github.com/rhinstaller/anaconda/issues/931
-cmdline
+url --url="http://mirrors.kernel.org/centos/7/os/x86_64/"
+install
 bootloader --disabled
 timezone --isUtc --nontp UTC
 rootpw --lock --iscrypted locked
@@ -23,8 +23,8 @@ shutdown
 
 # Disk setup
 zerombr
-clearpart --all
-part / --fstype ext4 --grow
+clearpart --all --initlabel
+part / --size 3000 --fstype ext4 --grow
 
 # Add nessasary repo for microdnf
 repo --name="microdnf" --baseurl="https://buildlogs.centos.org/cah-0.0.1" --cost=100
@@ -152,28 +152,21 @@ rm -fv /etc/localtime
 mv /usr/share/zoneinfo/UTC /etc/localtime
 rm -rfv  /usr/share/zoneinfo
 
+#Generate installtime file record
+/bin/date +%Y%m%d_%H%M > /etc/BUILDTIME
+
 ## Systemd fixes
 # no machine-id by default.
 :> /etc/machine-id
 
-## Final Pruning
-rm -rfv /var/{cache,log}/* /tmp/*
-
-%end
-
-%post --interpreter=/usr/bin/sh --nochroot --erroronfail --log=/mnt/sysimage/root/anaconda-post-nochroot.log
-set -eux
-# https://bugzilla.redhat.com/show_bug.cgi?id=1343138
-# Fix /run/lock breakage since it's not tmpfs in docker
-# This unmounts /run (tmpfs) and then recreates the files
-# in the /run directory on the root filesystem of the container
-# NOTE: run this in nochroot because "umount" does not exist in chroot
-umount /mnt/sysimage/run
 # The file that specifies the /run/lock tmpfile is
 # /usr/lib/tmpfiles.d/legacy.conf, which is part of the systemd
 # rpm that isn't included in this image. We'll create the /run/lock
 # file here manually with the settings from legacy.conf
-# NOTE: chroot to run "install" because it is not in anaconda env
-chroot /mnt/sysimage install -d /run/lock -m 0755 -o root -g root
+install -d /run/lock -m 0755 -o root -g root
+
+
+## Final Pruning
+rm -rfv /var/{cache,log}/* /tmp/*
 
 %end
